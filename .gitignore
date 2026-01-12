@@ -1,0 +1,91 @@
+# Byte-compiled Python files
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+venv/
+ENV/
+env/
+.venv/
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Logs and databases
+*.log
+*.sqlite3
+*.db
+
+# Flask specific
+instance/
+.flaskenv
+.env
+.env.local
+.env.production
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Directorio de pruebas unitarias
+tests/
+
+# Translations
+*.mo
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Other temporary files
+*.tmp
+*~
+
+# Rules
+.cursor/
+.cursor/rules
+.claude/
+
+# Uploads directory
+uploads/
+uploads/presentaciones/
+uploads/comprobantes/
+database.sql
+migration_view.sql
+migrations/
+
+data.sql
+db.sql
+dbsupabase.sql
+documentacion.md

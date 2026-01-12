@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simular Creación de Usuario</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+        }
+
+        button {
+            padding: 10px 20px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        #result {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+            white-space: pre-wrap;
+        }
+
+        .success {
+            color: green;
+        }
+
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Crear Usuario (Simulación)</h1>
+
+    <div class="form-group">
+        <label for="username">Username:</label>
+        <input type="text" id="username" value="admin">
+    </div>
+
+    <div class="form-group">
+        <label for="password">Password:</label>
+        <input type="text" id="password" value="Admin123">
+    </div>
+
+    <div class="form-group">
+        <label for="rol">Rol:</label>
+        <select id="rol" style="width: 100%; padding: 8px;">
+            <option value="usuario">Usuario</option>
+            <option value="gerente">Gerente</option>
+            <option value="admin">Admin</option>
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label for="almacen_id">Almacén:</label>
+        <select id="almacen_id" style="width: 100%; padding: 8px;">
+            <option value="">Cargando almacenes...</option>
+        </select>
+    </div>
+
+    <button onclick="createUser()">Crear Usuario</button>
+
+    <div id="result"></div>
+
+    <script>
+        // Cargar almacenes al iniciar
+        window.addEventListener('DOMContentLoaded', loadAlmacenes);
+
+        async function loadAlmacenes() {
+            const select = document.getElementById('almacen_id');
+            try {
+                const response = await fetch('http://localhost:5000/almacenes?per_page=100');
+                const data = await response.json();
+
+                select.innerHTML = '<option value="">Seleccionar Almacén</option>';
+
+                if (data.data && Array.isArray(data.data)) {
+                    data.data.forEach(almacen => {
+                        const option = document.createElement('option');
+                        option.value = almacen.id;
+                        option.textContent = `${almacen.nombre} (ID: ${almacen.id})`;
+                        select.appendChild(option);
+                    });
+                } else {
+                    select.innerHTML = '<option value="">Error al cargar formato</option>';
+                }
+            } catch (error) {
+                console.error('Error cargando almacenes:', error);
+                select.innerHTML = '<option value="">Error de conexión</option>';
+            }
+        }
+
+        async function createUser() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const rol = document.getElementById('rol').value;
+            const almacen_id = document.getElementById('almacen_id').value;
+
+            const resultDiv = document.getElementById('result');
+
+            resultDiv.textContent = "Enviando petición...";
+            resultDiv.className = "";
+
+            const payload = {
+                username: username,
+                password: password,
+                rol: rol
+            };
+
+            if (almacen_id) {
+                payload.almacen_id = parseInt(almacen_id);
+            }
+
+            try {
+                const response = await fetch('http://localhost:5000/usuarios', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultDiv.textContent = "Éxito:\n" + JSON.stringify(data, null, 2);
+                    resultDiv.className = "success";
+                } else {
+                    resultDiv.textContent = "Error (" + response.status + "):\n" + JSON.stringify(data, null, 2);
+                    resultDiv.className = "error";
+                }
+            } catch (error) {
+                resultDiv.textContent = "Error de red:\n" + error.message;
+                resultDiv.className = "error";
+            }
+        }
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,495 @@
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import CheckConstraint, UniqueConstraint, Index, func
+from datetime import datetime, timezone
+from extensions import db
+from decimal import Decimal
+
+class Users(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(256), nullable=False)
+    rol = db.Column(db.String(20), nullable=False, default='usuario')
+    almacen_id = db.Column(db.Integer, db.ForeignKey('almacenes.id', ondelete='SET NULL'))
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    
+    movimientos = db.relationship('Movimiento', back_populates='usuario')
+    almacen = db.relationship('Almacen', backref=db.backref('usuarios', lazy=True))
+
+    def __repr__(self):
+        return f'<User {self.username}>'
+
+class Producto(db.Model):
+    __tablename__ = 'productos'
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(255), nullable=False, unique=True)  # Ej: "Carbón Vegetal Premium"
+    descripcion = db.Column(db.Text)
+    precio_compra = db.Column(db.Numeric(12, 2), nullable=False)  # Precio por tonelada al proveedor
+    activo = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    def __repr__(self):
+        return f'<Producto {self.nombre}>'
+
+class PresentacionProducto(db.Model):
+    __tablename__ = 'presentaciones_producto'
+    id = db.Column(db.Integer, primary_key=True)
+    producto_id = db.Column(db.Integer, db.ForeignKey('productos.id', ondelete='CASCADE'), nullable=False)
+    nombre = db.Column(db.String(100), nullable=False)  # Ej: "Bolsa 5kg Supermercado"
+    capacidad_kg = db.Column(db.Numeric(10, 2), nullable=False)  # Peso neto del producto
+    tipo = db.Column(db.String(20), nullable=False)  # "bruto", "procesado", "merma", "briqueta", "detalle"
+    precio_venta = db.Column(db.Numeric(12, 2), nullable=False)  # Precio al público
+    activo = db.Column(db.Boolean, default=True)
+    url_foto = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    # Relaciones
+    producto = db.relationship('Producto', backref=db.backref('presentaciones', lazy=True))
+
+    __table_args__ = (
+        CheckConstraint("tipo IN ('bruto', 'procesado', 'merma', 'briqueta', 'detalle', 'insumo')"),
+        UniqueConstraint('producto_id', 'nombre', name='uq_producto_nombre_presentacion')
+    )
+
+class Lote(db.Model):
+    __tablename__ = 'lotes'
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Campos existentes
+    producto_id = db.Column(db.Integer, db.ForeignKey('productos.id', ondelete='CASCADE'), nullable=True)
+    proveedor_id = db.Column(db.Integer, db.ForeignKey('proveedores.id', ondelete='SET NULL'), nullable=True)
+    descripcion = db.Column(db.String(255))
+    peso_humedo_kg = db.Column(db.Numeric(10, 2), nullable=True)
+    peso_seco_kg = db.Column(db.Numeric(10, 2), nullable=True)
+    cantidad_disponible_kg = db.Column(db.Numeric(10, 2))
+    fecha_ingreso = db.Column(db.DateTime(timezone=True))
+    
+    # Nuevos campos para Lotes de Producción
+    codigo_lote = db.Column(db.String(100), unique=True, nullable=True)
+    es_produccion = db.Column(db.Boolean, default=False, nullable=False)
+    lote_origen_id = db.Column(db.Integer, db.ForeignKey('lotes.id'), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=True)
+
+
+
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    # Relaciones
+    producto = db.relationship('Producto', backref=db.backref('lotes', lazy=True))
+    proveedor = db.relationship('Proveedor', backref=db.backref('lotes', lazy=True))
+    
+    lote_origen = db.relationship('Lote', remote_side=[id], backref='lotes_derivados')
+
+class Almacen(db.Model):
+    __tablename__ = 'almacenes'
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(255), nullable=False)
+    direccion = db.Column(db.Text)
+    ciudad = db.Column(db.String(100))
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    
+    # Relaciones existentes (se mantienen)
+    inventario = db.relationship('Inventario', backref='almacen', lazy=True)
+    ventas = db.relationship('Venta', backref='almacen', lazy=True)
+
+    def __repr__(self):
+        return f'<Almacen {self.nombre}>'
+
+class Inventario(db.Model):
+    __tablename__ = 'inventario'
+    id = db.Column(db.Integer, primary_key=True)  # PK autoincremental
+    presentacion_id = db.Column(db.Integer, db.ForeignKey('presentaciones_producto.id', ondelete='CASCADE'), nullable=False)
+    almacen_id = db.Column(db.Integer, db.ForeignKey('almacenes.id', ondelete='CASCADE'), nullable=False)
+    lote_id = db.Column(db.Integer, db.ForeignKey('lotes.id', ondelete='SET NULL'))
+
+    cantidad = db.Column(db.Numeric(12, 4), nullable=False, default=0)
+    stock_minimo = db.Column(db.Integer, nullable=False, default=10)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    ultima_actualizacion = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    # Relaciones
+    presentacion = db.relationship('PresentacionProducto')
+    lote = db.relationship('Lote')
+
+    __table_args__ = (
+        # Garantizar que no haya duplicados para la combinación de estos tres campos
+        UniqueConstraint('presentacion_id', 'almacen_id', 'lote_id', name='uq_inventario_compuesto'),
+        
+        # Índices para mejorar el rendimiento de consultas comunes
+        Index('idx_inventario_almacen', 'almacen_id', 'presentacion_id'),
+    )
+
+class Venta(db.Model):
+    __tablename__ = 'ventas'
+    id = db.Column(db.Integer, primary_key=True)
+    cliente_id = db.Column(db.Integer, db.ForeignKey('clientes.id', ondelete='CASCADE'), nullable=False)
+    almacen_id = db.Column(db.Integer, db.ForeignKey('almacenes.id', ondelete='CASCADE'), nullable=False)
+    vendedor_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
+    fecha = db.Column(db.DateTime(timezone=True))
+    total = db.Column(db.Numeric(12, 2), nullable=False)
+    tipo_pago = db.Column(db.String(10), nullable=False)
+    estado_pago = db.Column(db.String(15), default='pendiente')
+    consumo_diario_kg = db.Column(db.Numeric(10, 2))  # Estimación global para proyecciones
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    # Relaciones
+    vendedor = db.relationship('Users')
+    cliente = db.relationship('Cliente', back_populates='ventas')
+    detalles = db.relationship('VentaDetalle', backref='venta', lazy=True, cascade="all, delete-orphan")
+    pagos = db.relationship("Pago", backref="venta", lazy=True, cascade="all, delete-orphan")
+
+    @property
+    def saldo_pendiente(self):
+        total_pagado = sum(pago.monto for pago in self.pagos)
+        return self.total - total_pagado
+
+    def actualizar_estado(self, **kwargs):
+        """
+        Actualiza el estado de pago de la venta basándose en la suma
+        directa de los pagos en la base de datos para mayor fiabilidad.
+        """
+        # Se importa aquí para evitar dependencia circular
+        from models import Pago
+
+        # Consulta directa a la BD para obtener la suma real de pagos,
+        # incluyendo los que acaban de ser "flusheados".
+        total_pagado_query = db.session.query(func.sum(Pago.monto)).filter(Pago.venta_id == self.id).scalar()
+
+        # Si no hay pagos, el resultado es None, lo convertimos a Decimal(0)
+        total_pagado = total_pagado_query or Decimal('0.0')
+
+        saldo = self.total - total_pagado
+
+        # Usar una pequeña tolerancia para errores de punto flotante
+        if abs(saldo) <= Decimal('0.001'):
+            self.estado_pago = 'pagado'
+        elif total_pagado > 0:
+            self.estado_pago = 'parcial'
+        else:
+            self.estado_pago = 'pendiente'
+
+    __table_args__ = (
+        CheckConstraint("tipo_pago IN ('contado', 'credito')"),
+        CheckConstraint("estado_pago IN ('pendiente', 'parcial', 'pagado')")
+    )
+
+class VentaDetalle(db.Model):
+    __tablename__ = 'venta_detalles'
+    id = db.Column(db.Integer, primary_key=True)
+    venta_id = db.Column(db.Integer, db.ForeignKey('ventas.id', ondelete='CASCADE'), nullable=False)
+    presentacion_id = db.Column(db.Integer, db.ForeignKey('presentaciones_producto.id', ondelete='CASCADE'), nullable=False)
+    lote_id = db.Column(db.Integer, db.ForeignKey('lotes.id', ondelete='SET NULL'), nullable=True)
+    cantidad = db.Column(db.Integer, nullable=False)
+    precio_unitario = db.Column(db.Numeric(12, 2), nullable=False)  # Precio en el momento de la venta
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    # Relación
+    presentacion = db.relationship('PresentacionProducto')
+    lote = db.relationship('Lote')
+
+    @property
+    def total_linea(self):
+        return self.cantidad * self.precio_unitario
+
+class Merma(db.Model):
+    __tablename__ = 'mermas'
+    id = db.Column(db.Integer, primary_key=True)
+    lote_id = db.Column(db.Integer, db.ForeignKey('lotes.id', ondelete='CASCADE'), nullable=False)
+    cantidad_kg = db.Column(db.Numeric(10, 2), nullable=False)
+    convertido_a_briquetas = db.Column(db.Boolean, default=False)
+    fecha_registro = db.Column(db.DateTime(timezone=True))
+    usuario_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    lote = db.relationship('Lote', backref='mermas')
+
+class Proveedor(db.Model):
+    __tablename__ = 'proveedores'
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(255), nullable=False, unique=True)
+    telefono = db.Column(db.String(20))
+    direccion = db.Column(db.Text)
+    created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+class Cliente(db.Model):
+    __tablename__ = 'clientes'
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(255), nullable=False)
+    telefono = db.Column(db.String(20))
+    direccion = db.Column(db.Text)
+    ciudad = db.Column(db.String(100))
+    frecuencia_compra_dias = db.Column(db.Integer)
+    ultima_fecha_compra = db.Column(db.DateTime(timezone=True))
+    proxima_compra_manual = db.Column(db.Date, nullable=True)  # Fecha manual de próxima compra
+    ultimo_contacto = db.Column(db.DateTime(timezone=True), nullable=True)  # Fecha del último contacto (llamada, etc.)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    ventas = db.relationship('Venta', back_populates='cliente', lazy=True)
+
+    @property
+    def saldo_pendiente(self):
+        return sum(
+            venta.total - sum(pago.monto for pago in venta.pagos)
+            for venta in self.ventas
+            if venta.estado_pago != 'pagado'
+        )
+
+    def __repr__(self):
+        return f'<Cliente {self.nombre}>'
+
+
+class Pago(db.Model):
+    __tablename__ = "pagos"
+    id = db.Column(db.Integer, primary_key=True)
+    venta_id = db.Column(db.Integer, db.ForeignKey("ventas.id", ondelete="CASCADE"), nullable=False)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
+    monto = db.Column(db.Numeric(12, 2), nullable=False) 
+    fecha = db.Column(db.DateTime(timezone=True))
+    metodo_pago = db.Column(db.String(20), nullable=False)  # "efectivo", "transferencia", "tarjeta"
+    referencia = db.Column(db.String(50))  # Número de transacción o comprobante
+    url_comprobante = db.Column(db.String(255))
+    
+    # Campos para rastreo de depósitos directos a cuenta corporativa
+    monto_depositado = db.Column(db.Numeric(12, 2), nullable=True)  # Monto realmente depositado en cuenta corporativa
+    depositado = db.Column(db.Boolean, default=False, nullable=False)  # Si se realizó el depósito
+    fecha_deposito = db.Column(db.DateTime(timezone=True), nullable=True)  # Fecha del depósito bancario
+
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    usuario = db.relationship('Users')
+
+    @property
+    def monto_en_gerencia(self):
+        """Calcula el monto que quedó en manos de gerentes (no depositado)"""
+        if self.depositado and self.monto_depositado is not None:
+            return self.monto - self.monto_depositado
+        elif not self.depositado:
+            return self.monto
+        return 0
+
+    __table_args__ = (
+        CheckConstraint("metodo_pago IN ('efectivo', 'deposito', 'transferencia', 'tarjeta', 'yape_plin', 'otro')"),
+        CheckConstraint("monto_depositado >= 0 OR monto_depositado IS NULL"),
+        CheckConstraint("(depositado = true AND monto_depositado IS NOT NULL AND fecha_deposito IS NOT NULL) OR (depositado = false)"),
+        Index('idx_pago_fecha_deposito', 'fecha_deposito'),
+        Index('idx_pago_depositado_fecha', 'depositado', 'fecha_deposito'),
+    )
+
+class Movimiento(db.Model):
+    __tablename__ = 'movimientos'
+    id = db.Column(db.Integer, primary_key=True)
+    tipo = db.Column(db.String(10), nullable=False)
+    
+    # Relación con PresentacionProducto (1) - Nullable para materias primas
+    presentacion_id = db.Column(db.Integer, db.ForeignKey('presentaciones_producto.id', ondelete='CASCADE'), nullable=True)
+    presentacion = db.relationship('PresentacionProducto')
+    
+    # Relación con Lote (2)
+    lote_id = db.Column(db.Integer, db.ForeignKey('lotes.id', ondelete='SET NULL'))
+    lote = db.relationship('Lote', foreign_keys=[lote_id])
+    
+    # Relación con Usuario (3)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
+    usuario = db.relationship('Users', back_populates='movimientos')  # Nombre del modelo en singular
+    
+    cantidad = db.Column(db.Numeric(12, 2), nullable=False)
+    fecha = db.Column(db.DateTime(timezone=True))
+    motivo = db.Column(db.String(255))
+    
+    # Campos adicionales para trazabilidad de producción
+    tipo_operacion = db.Column(db.String(20))  # "produccion", "venta", "ajuste", "merma", "transferencia"
+    lote_origen_id = db.Column(db.Integer, db.ForeignKey('lotes.id', ondelete='SET NULL'))  # Para conversiones
+    lote_origen = db.relationship('Lote', foreign_keys='Movimiento.lote_origen_id')
+    cantidad_kg_procesados = db.Column(db.Numeric(10, 2))  # Kg de materia prima utilizados
+    eficiencia_conversion = db.Column(db.Numeric(5, 2))  # % de eficiencia en la conversión
+    turno_produccion = db.Column(db.String(10))  # "mañana", "tarde", "noche"
+    
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    @property
+    def total_kg(self):
+        """Calcula el total de kilogramos para el movimiento."""
+        if self.presentacion and self.presentacion.capacidad_kg is not None:
+            try:
+                # Asegurarse de que ambos valores son Decimal antes de multiplicar
+                cantidad_decimal = Decimal(str(self.cantidad))
+                capacidad_kg_decimal = Decimal(str(self.presentacion.capacidad_kg))
+                return cantidad_decimal * capacidad_kg_decimal
+            except Exception as e:
+                # Considera loggear este error en un sistema de logging real
+                print(f"Error al calcular total_kg para movimiento {self.id}: {e}")
+                return Decimal('0.00') # O manejar el error de otra manera
+        return Decimal('0.00')
+
+    __table_args__ = (
+        CheckConstraint("tipo IN ('entrada', 'salida')"),
+        CheckConstraint("cantidad > 0"),
+        CheckConstraint("tipo_operacion IN ('produccion', 'venta', 'ajuste', 'merma', 'transferencia', 'ensamblaje') OR tipo_operacion IS NULL"),
+        CheckConstraint("turno_produccion IN ('mañana', 'tarde', 'noche') OR turno_produccion IS NULL"),
+        CheckConstraint("eficiencia_conversion >= 0 AND eficiencia_conversion <= 100 OR eficiencia_conversion IS NULL"),
+    )
+
+class Gasto(db.Model):
+    __tablename__ = 'gastos'
+    id = db.Column(db.Integer, primary_key=True)
+    descripcion = db.Column(db.Text, nullable=False)
+    monto = db.Column(db.Numeric(12, 2), nullable=False)
+    fecha = db.Column(db.Date)
+    categoria = db.Column(db.String(50), nullable=False)  # "logistica", "personal", "otros"
+    almacen_id = db.Column(db.Integer, db.ForeignKey('almacenes.id'))  # Relación con almacén
+    lote_id = db.Column(db.Integer, db.ForeignKey('lotes.id'), nullable=True)
+    usuario_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    usuario = db.relationship('Users')
+    almacen = db.relationship('Almacen')
+    lote = db.relationship('Lote')
+
+    __table_args__ = (
+        CheckConstraint("categoria IN ('logistica', 'personal', 'otros')"),
+    )
+
+class Pedido(db.Model):
+    __tablename__ = 'pedidos'
+    id = db.Column(db.Integer, primary_key=True)
+    cliente_id = db.Column(db.Integer, db.ForeignKey('clientes.id', ondelete='CASCADE'), nullable=False)
+    almacen_id = db.Column(db.Integer, db.ForeignKey('almacenes.id', ondelete='CASCADE'), nullable=False)
+    vendedor_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
+    fecha_creacion = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    fecha_entrega = db.Column(db.DateTime(timezone=True), nullable=False)
+    estado = db.Column(db.String(20), default='programado')  # programado, confirmado, entregado, cancelado
+    notas = db.Column(db.Text)
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    
+    # Relaciones
+    cliente = db.relationship('Cliente', backref=db.backref('pedidos', lazy=True))
+    almacen = db.relationship('Almacen')
+    vendedor = db.relationship('Users')
+    detalles = db.relationship('PedidoDetalle', backref='pedido', lazy=True, cascade="all, delete-orphan")
+    
+    @property
+    def total_estimado(self):
+        return sum(detalle.cantidad * detalle.precio_estimado for detalle in self.detalles)
+    
+    __table_args__ = (
+        CheckConstraint("estado IN ('programado', 'confirmado', 'entregado', 'cancelado')"),
+    )
+
+class PedidoDetalle(db.Model):
+    __tablename__ = 'pedido_detalles'
+    id = db.Column(db.Integer, primary_key=True)
+    pedido_id = db.Column(db.Integer, db.ForeignKey('pedidos.id', ondelete='CASCADE'), nullable=False)
+    presentacion_id = db.Column(db.Integer, db.ForeignKey('presentaciones_producto.id', ondelete='CASCADE'), nullable=False)
+    cantidad = db.Column(db.Integer, nullable=False)
+    precio_estimado = db.Column(db.Numeric(12, 2), nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    
+    # Relación
+    presentacion = db.relationship('PresentacionProducto')
+
+class DepositoBancario(db.Model):
+    __tablename__ = 'depositos_bancarios'
+    id = db.Column(db.Integer, primary_key=True)
+    fecha_deposito = db.Column(db.DateTime(timezone=True), nullable=False)
+    monto_depositado = db.Column(db.Numeric(12, 2), nullable=False)
+    almacen_id = db.Column(db.Integer, db.ForeignKey('almacenes.id', ondelete='SET NULL'))
+    usuario_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'))
+    referencia_bancaria = db.Column(db.String(100))
+    url_comprobante_deposito = db.Column(db.String(255))
+    notas = db.Column(db.Text)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    
+    # Relaciones
+    almacen = db.relationship('Almacen')
+    usuario = db.relationship('Users')
+    
+    __table_args__ = (
+        CheckConstraint("monto_depositado > 0"),
+    )
+
+class Receta(db.Model):
+    __tablename__ = 'recetas'
+    id = db.Column(db.Integer, primary_key=True)
+    # La presentación final que esta receta produce
+    presentacion_id = db.Column(db.Integer, db.ForeignKey('presentaciones_producto.id', ondelete='CASCADE'), nullable=False, unique=True)
+    nombre = db.Column(db.String(255), nullable=False)
+    descripcion = db.Column(db.Text)
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    updated_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+
+    presentacion = db.relationship('PresentacionProducto', backref=db.backref('receta', uselist=False, lazy=True))
+    componentes = db.relationship('ComponenteReceta', backref='receta', lazy=True, cascade="all, delete-orphan")
+
+class ComponenteReceta(db.Model):
+    __tablename__ = 'componentes_receta'
+    id = db.Column(db.Integer, primary_key=True)
+    receta_id = db.Column(db.Integer, db.ForeignKey('recetas.id', ondelete='CASCADE'), nullable=False)
+    # La presentación del componente que se consume
+    componente_presentacion_id = db.Column(db.Integer, db.ForeignKey('presentaciones_producto.id', ondelete='CASCADE'), nullable=False)
+    # Cantidad del componente necesaria para producir UNA unidad del producto final
+    cantidad_necesaria = db.Column(db.Numeric(12, 4), nullable=False)
+    tipo_consumo = db.Column(db.String(20), nullable=False, default='insumo') # 'materia_prima' o 'insumo'
+
+    componente_presentacion = db.relationship('PresentacionProducto', foreign_keys=[componente_presentacion_id])
+
+    __table_args__ = (
+        CheckConstraint("tipo_consumo IN ('materia_prima', 'insumo')"),
+        UniqueConstraint('receta_id', 'componente_presentacion_id', name='uq_receta_componente')
+    )
+
+class ComandoVozLog(db.Model):
+    """
+    Tabla de auditoría para comandos de voz.
+    Registra todos los comandos procesados por Gemini para trazabilidad,
+    detección de ataques y análisis de uso.
+    """
+    __tablename__ = 'comandos_voz_logs'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    usuario_id = db.Column(db.Integer, nullable=False)  # Relación lógica con Users
+    almacen_id = db.Column(db.Integer, nullable=True)
+    texto_original = db.Column(db.Text, nullable=False)
+    interpretacion = db.Column(db.JSON, nullable=True)  # Respuesta completa de Gemini
+    accion_detectada = db.Column(db.String(50))  # 'interpretar_operacion', 'error', 'security_block'
+    exito = db.Column(db.Boolean, default=False)
+    latencia_ms = db.Column(db.Integer, nullable=True)  # Tiempo de procesamiento
+    created_at = db.Column(db.DateTime(timezone=True), server_default=db.func.now())
+    
+    __table_args__ = (
+        Index('idx_comandos_voz_usuario', 'usuario_id'),
+        Index('idx_comandos_voz_created', 'created_at'),
+        Index('idx_comandos_voz_exito', 'exito', 'created_at'),
+    )
+
+class VistaClienteProyeccion(db.Model):
+    __tablename__ = 'vista_clientes_proyeccion'
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(255))
+    telefono = db.Column(db.String(20))
+    ciudad = db.Column(db.String(100))
+    ultima_fecha_compra = db.Column(db.DateTime(timezone=True))
+    frecuencia_compra_dias = db.Column(db.Integer)
+    saldo_pendiente = db.Column(db.Numeric(12, 2))
+    proxima_compra_estimada = db.Column(db.DateTime(timezone=True))
+    dias_desde_ultima_compra = db.Column(db.Integer)
+    dias_retraso = db.Column(db.Integer)
+    estado_proyeccion = db.Column(db.String(20))
+    total_ventas = db.Column(db.Integer)
+    monto_total_comprado = db.Column(db.Numeric(12, 2))
+    promedio_compra = db.Column(db.Numeric(12, 2))
+    proxima_compra_manual = db.Column(db.Date)
+    ultimo_contacto = db.Column(db.DateTime(timezone=True))
